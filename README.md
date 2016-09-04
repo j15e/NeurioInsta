@@ -17,6 +17,6 @@ This is the setup I use, but any ESP8266 Wifi board should work :
 
 Copy the exemple configuration in your project :
 
-   cp NeurioInstaEnv.h.exemple NeurioInstaEnv.h
+    cp NeurioInstaEnv.h.exemple NeurioInstaEnv.h
 
 Define your Wifi settings & Neurip IP in this file.
