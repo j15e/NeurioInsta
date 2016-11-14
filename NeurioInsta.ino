@@ -2,9 +2,24 @@
 
 #include <Adafruit_LEDBackpack.h>
 #include <ArduinoJson.h>
+#include <NTPClient.h>
 #include <ESP8266WiFi.h>
+#include <WiFiUdp.h>
+#include <Time.h>
+#include <TimeLib.h>
+#include <Timezone.h>
 
 Adafruit_7segment matrix = Adafruit_7segment();
+
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP);
+
+//US Eastern Time Zone
+TimeChangeRule usEdt = {"EDT", Second, Sun, Mar, 2, -240};    //UTC - 4 hours
+TimeChangeRule usEst = {"EST", First, Sun, Nov, 2, -300};     //UTC - 5 hours
+Timezone timezone(usEdt, usEst);
+TimeChangeRule *tcr;
+time_t utc, local;
 
 int load_time = 0;
 int max_pw_read = 0;
@@ -37,6 +52,9 @@ void setup() {
   Serial.println("WiFi connected");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
+
+  setSyncProvider(getNtpTime);
+  setSyncInterval(60);
 }
 
 void loop() {
@@ -82,7 +100,17 @@ void loop() {
 
   // Display current consumption & set brightness relative to maximum consumption
   matrix.setBrightness((float)consumption / max_pw_read * 15);
-  matrix.print(consumption);
+
+  // Close display between midnight & 6 AM
+  utc = now();
+  local = timezone.toLocal(utc, &tcr);
+  int current_hour = hour(local);
+  if(current_hour >= NIGHT_START || current_hour < NIGHT_STOP) {
+    matrix.clear();
+  } else {
+    matrix.print(consumption);
+  }
+
   matrix.writeDisplay();
   delay(200);
 }
@@ -118,4 +146,10 @@ void showReady(Adafruit_7segment matrix){
   matrix.writeDigitRaw(3, 0x49);
   matrix.writeDigitRaw(4, 0x49);
   matrix.writeDisplay();
+}
+
+// Return the time from the Ntp time client
+time_t getNtpTime(){
+  timeClient.update();
+  return timeClient.getEpochTime();
 }
