@@ -2,3 +2,4 @@
 #define WIFI_PASSWORD "your-wifi-password"
 #define NEURIO_IP "your-neurio-ip"
 #define MATRIX_ADDR 0x70
+#define DEBUG 1
