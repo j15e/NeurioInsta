@@ -9,7 +9,8 @@
 #include <TimeLib.h>
 #include <Timezone.h>
 
-Adafruit_7segment matrix = Adafruit_7segment();
+Adafruit_7segment matrix1 = Adafruit_7segment();
+Adafruit_7segment matrix2 = Adafruit_7segment();
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "1.openwrt.pool.ntp.org");
@@ -49,16 +50,19 @@ void setup() {
   WiFi.begin(WIFI_NAME, WIFI_PASSWORD);
 
   // Set display matrix address
-  matrix.begin(MATRIX_ADDR);
+  matrix1.begin(MATRIX1_ADDR);
+  matrix2.begin(MATRIX2_ADDR);
 
   while (WiFi.status() != WL_CONNECTED) {
     print(".");
-    showLoading(matrix, load_time);
+    showLoading(matrix1, load_time);
+    showLoading(matrix2, load_time);
     load_time++;
     delay(120);
   }
 
-  showReady(matrix);
+  showReady(matrix1);
+  showReady(matrix2);
 
   println();
   println("WiFi connected");
@@ -117,8 +121,10 @@ void loop() {
         } else {
           println("Display OFF");
           is_active = false;
-          matrix.clear();
-          matrix.writeDisplay();
+          matrix1.clear();
+          matrix2.clear();
+          matrix1.writeDisplay();
+          matrix2.writeDisplay();
         }
       }
     } else {
@@ -174,9 +180,13 @@ void showConsumption(){
   }
 
   // Display current consumption & set brightness relative to maximum consumption
-  matrix.print(consumption);
-  matrix.setBrightness((float)consumption / max_pw_read * 15);
-  matrix.writeDisplay();
+  float brightness = (float)consumption / max_pw_read * 15;
+  matrix1.print(consumption);
+  matrix1.setBrightness(brightness);
+  matrix1.writeDisplay();
+  matrix2.print(max_pw_read);
+  matrix2.setBrightness(brightness);
+  matrix2.writeDisplay();
 }
 
 // Get all client body response
