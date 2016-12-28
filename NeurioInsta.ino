@@ -232,7 +232,7 @@ String getBodyResponse(WiFiClient client){
 // [ =  ]
 // [  = ]
 // [   =]
-void showLoading(Adafruit_7segment matrix, int load_time){
+void showLoading(Adafruit_7segment &matrix, int load_time){
   int displayDigit = (load_time % 4);
   int digit = 0;
 
@@ -252,7 +252,7 @@ void showLoading(Adafruit_7segment matrix, int load_time){
 }
 
 // Show ready screen [====]
-void showReady(Adafruit_7segment matrix){
+void showReady(Adafruit_7segment &matrix){
   matrix.writeDigitRaw(0, 0x49);
   matrix.writeDigitRaw(1, 0x49);
   matrix.writeDigitRaw(3, 0x49);
