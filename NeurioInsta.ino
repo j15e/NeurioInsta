@@ -181,10 +181,12 @@ void showConsumption(){
 
   // Display current consumption & set brightness relative to maximum consumption
   float brightness = (float)consumption / max_pw_read * 15;
-  matrix1.print(consumption);
+
+  printPw2Matrix(consumption, matrix1);
   matrix1.setBrightness(brightness);
   matrix1.writeDisplay();
-  matrix2.print(max_pw_read);
+  
+  printPw2Matrix(max_pw_read, matrix2);
   matrix2.setBrightness(brightness);
   matrix2.writeDisplay();
 }
@@ -260,6 +262,15 @@ void showReady(Adafruit_7segment matrix){
 
 String formatTime(time_t t) {
   return String("") + hour(t) + (":") + minute(t) + ":" + second(t);
+}
+
+// Display power on matrix & show as thousands if required
+void printPw2Matrix(int pw, Adafruit_7segment &matrix){
+  if(pw > 9999) {
+    matrix.print((float)pw / 1000, 3);
+  } else {
+    matrix.print(pw);
+  }
 }
 
 // Return the time from the Ntp time client
