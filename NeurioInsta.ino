@@ -32,6 +32,10 @@ int max_pw_read = 0;
 bool is_active = true;
 time_t local_trip = 0;
 
+#define NEURIO_GET_QUERY_P1 "GET /current-sample HTTP/1.1\r\nHost: "
+#define NEURIO_GET_QUERY_P2 "\r\nConnection: keep-alive\r\n\r\n"
+#define NEURIO_GET_QUERY NEURIO_GET_QUERY_P1 NEURIO_IP NEURIO_GET_QUERY_P2
+
 void setup() {
   // Set IPs from strings
   neurio_ip.fromString(NEURIO_IP);
@@ -67,9 +71,9 @@ void setup() {
   println();
   println("WiFi connected");
   print("IP address: ");
-  println(String("") + WiFi.localIP());
+  Serial.println(WiFi.localIP());
   print("Mac Address: ");
-  println(String("") + WiFi.macAddress());
+  Serial.println(WiFi.macAddress());
 
   setSyncProvider(getNtpTime);
   while(timeStatus() == timeNotSet) { delay(50); }
@@ -80,7 +84,7 @@ void loop() {
   time_t utc = now();
   time_t local = usEastern.toLocal(utc);
 
-  print("Current Time : ");
+  print("Current Time: ");
   println(formatTime(local));
 
   // Up to 5 second before max trip grace - keep active without check
@@ -141,24 +145,20 @@ void loop() {
 }
 
 void showConsumption(){
-  bool connected = false;
+  bool connected = neurio_client.connected();
   
-  connected = neurio_client.connected();
   if(!connected){
-    connected = neurio_client.connect(neurio_ip, NEURIO_PORT);
+    connected = neurio_client.connect(neurio_ip, 80);
   }
   
   if (connected) {
     neurio_client.setNoDelay(1);
-    neurio_client.print(String("GET /current-sample ") +
-                       "HTTP/1.1\r\n" +
-                       "Host: " + NEURIO_IP + "\r\n" +
-                       "Connection: keep-alive\r\n\r\n");
+    neurio_client.print(NEURIO_GET_QUERY);
                  
     // Read all the lines of the reply from server and print them to Serial
     String response = getJsonBodyResponse(neurio_client);
-
-    StaticJsonBuffer<2048> jsonBuffer;
+  
+    DynamicJsonBuffer jsonBuffer;
     JsonObject& sample = jsonBuffer.parseObject(response);
     
     if (!sample.success()) {
@@ -260,8 +260,19 @@ void showReady(Adafruit_7segment &matrix){
   matrix.writeDisplay();
 }
 
-String formatTime(time_t t) {
-  return String("") + hour(t) + (":") + minute(t) + ":" + second(t);
+char* formatTime(time_t t) {
+  char timeStr[8];
+  
+  timeStr[0] = '0' + hour(t) / 10;
+  timeStr[1] = '0' + hour(t) % 10;
+  timeStr[2] = ':';
+  timeStr[3] = '0' + minute(t) / 10;
+  timeStr[4] = '0' + minute(t) % 10;
+  timeStr[5] = ':';
+  timeStr[6] = '0' + second(t) / 10;
+  timeStr[7] = '0' + second(t) % 10;
+
+  return timeStr;
 }
 
 // Display power on matrix & show as thousands if required
@@ -280,7 +291,13 @@ time_t getNtpTime(){
 }
 
 // Debug output methods
-void print(String str){
+void print(String &str){
+  #ifdef DEBUG
+  Serial.print(str);
+  #endif
+}
+
+void print(const char *str){
   #ifdef DEBUG
   Serial.print(str);
   #endif
@@ -292,7 +309,13 @@ void println(){
   #endif
 }
 
-void println(String str){
+void println(String &str){
+  #ifdef DEBUG
+  Serial.println(str);
+  #endif
+}
+
+void println(const char *str){
   #ifdef DEBUG
   Serial.println(str);
   #endif
