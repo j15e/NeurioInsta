@@ -26,11 +26,12 @@ TimeChangeRule usEdt = {"EDT", Second, Sun, Mar, 2, -240}; //UTC - 4 hours
 TimeChangeRule usEst = {"EST", First, Sun, Nov, 2, -300};  //UTC - 5 hours
 Timezone usEastern(usEdt, usEst);
 
-int load_time = 0;
-int consumption = 0;
-int max_pw_read = 0;
-bool is_active = true;
+unsigned int load_time = 0;
+unsigned int max_pw_read = 0;
+unsigned long day_start_kwh = 0;
+time_t day_start_time = 0;
 time_t local_trip = 0;
+bool is_active = true;
 
 #define NEURIO_GET_QUERY_P1 "GET /current-sample HTTP/1.1\r\nHost: "
 #define NEURIO_GET_QUERY_P2 "\r\nConnection: keep-alive\r\n\r\n"
@@ -81,16 +82,16 @@ void setup() {
 
 void loop() {
   // Close display when no movement
-  time_t utc = now();
-  time_t local = usEastern.toLocal(utc);
+  time_t local = usEastern.toLocal(now());
+  bool show = false;
 
   print("Current Time: ");
-  println(formatTime(local));
+  printTime(local);
 
   // Up to 5 second before max trip grace - keep active without check
   if (local_trip != 0 && (local_trip + TRIP_DELAY - 5) > local) {
     println("Direct Display");
-    showConsumption();
+    show = true;
   } else {
     // Check for last trip
     bool connected = vera_client.connected();
@@ -108,44 +109,52 @@ void loop() {
       if(last_trip == "TIMEOUT") {
         // Vera not responding - kee previous state
         println("Vera Response Failed");
-        if(is_active) {
-          showConsumption();
-        }
+        show = is_active;
       } else {
         time_t trip = last_trip.toInt();
         local_trip = usEastern.toLocal(trip);
 
         print("Last Trip: ");
-        println(formatTime(local_trip));
+        printTime(local_trip);
 
         if((local_trip + TRIP_DELAY) > local) {
           println("Display ON");
           is_active = true;
-          showConsumption();
-        } else {
-          println("Display OFF");
-          is_active = false;
-          matrix1.clear();
-          matrix2.clear();
-          matrix1.writeDisplay();
-          matrix2.writeDisplay();
+          show = true;
         }
       }
     } else {
       // Vera not responding - kee previous state
       println("Vera Connection Failed");
-      if(is_active) {
-        showConsumption();
-      }
+      show = is_active;
     }
+  }
+
+  // Get & show consumption
+  if(show) {
+    getConsumption(true);
+  // Get required for consumption of the day
+  } else if(day_start_time == 0 || day(day_start_time) < day(local)) {
+    getConsumption(false);
+  } else {
+    println("Display OFF");
+    is_active = false;
+    matrix1.clear();
+    matrix2.clear();
+    matrix1.writeDisplay();
+    matrix2.writeDisplay();
   }
 
   println();
   delay(250);
 }
 
-void showConsumption(){
+void getConsumption(bool show){
   bool connected = neurio_client.connected();
+  time_t current_time = usEastern.toLocal(now());
+  unsigned long consumption_kwh = 0;
+  unsigned int consumption_pw = 0;
+  unsigned int today_imported_wh = 0;
   
   if(!connected){
     connected = neurio_client.connect(neurio_ip, 80);
@@ -162,49 +171,69 @@ void showConsumption(){
     JsonObject& sample = jsonBuffer.parseObject(response);
     
     if (!sample.success()) {
-      println("JSON parsing failed!");
-      println("Response body :");
+      println("JSON parsing failed - response body was :");
       println(response);
       return;
     }
-    consumption = sample["channels"][2]["p_W"];
+    
+    consumption_kwh = ws2wh(sample["channels"][2]["eImp_Ws"]);
+    consumption_pw = sample["channels"][2]["p_W"];
 
     // Track maximum consumption peak
-    if(consumption > max_pw_read) {
-      max_pw_read = consumption;
+    if(consumption_pw > max_pw_read) {
+      max_pw_read = consumption_pw;
     }
-    println(String("Current Power : ") + consumption + "kw");
-    println(String("Maximum Power : ") + max_pw_read + "kw");
+
+    // Track consumption over time
+    if(day_start_time == 0 || day(day_start_time) < day(current_time)) {
+      day_start_kwh = consumption_kwh;
+      day_start_time = current_time;
+    }
+    
+    today_imported_wh = (consumption_kwh - day_start_kwh);
+
+    #ifdef DEBUG
+    char buffer[28];
+    sprintf(buffer, "Current Power : %dkW", consumption_pw);
+    println(buffer);
+    sprintf(buffer, "Maximum Power : %dkW", max_pw_read);
+    println(buffer);
+    sprintf(buffer, "Imported Power : %dWh", today_imported_wh);
+    println(buffer);
+    #endif
   } else {
     println("Neurio connection failed");
   }
 
-  // Display current consumption & set brightness relative to maximum consumption
-  float brightness = (float)consumption / max_pw_read * 15;
+  // Stop here if display off
+  if(!show) return;
 
-  printPw2Matrix(consumption, matrix1);
+  // Display current consumption & set brightness relative to maximum consumption
+  float brightness = (float)consumption_pw / max_pw_read * 15;
+
+  printPw2Matrix(consumption_pw, matrix1);
   matrix1.setBrightness(brightness);
   matrix1.writeDisplay();
   
-  printPw2Matrix(max_pw_read, matrix2);
+  printPw2Matrix(today_imported_wh, matrix2);
   matrix2.setBrightness(brightness);
   matrix2.writeDisplay();
 }
 
 // Get all client body response
-String getJsonBodyResponse(WiFiClient client){
+String getJsonBodyResponse(WiFiClient &client){
   while(client.available()){
-    client.setTimeout(50);
+    client.setTimeout(200);
     String line = client.readStringUntil('\r');
     // Get only the JSON body, skip headers
     if(line.startsWith("\n{")) {
       return line;
     }
   }
-  return "Response body not found";
+  return "NOT_FOUND";
 }
 
-String getBodyResponse(WiFiClient client){
+String getBodyResponse(WiFiClient &client){
   int max_delay = 5;
   while(!client.available()){
     max_delay--;
@@ -216,7 +245,7 @@ String getBodyResponse(WiFiClient client){
   }
 
   while(client.available()){
-    client.setTimeout(50);
+    client.setTimeout(200);
     String line = client.readStringUntil('\r');
     // Look for headers end
     if(line == "\n") {
@@ -260,21 +289,6 @@ void showReady(Adafruit_7segment &matrix){
   matrix.writeDisplay();
 }
 
-char* formatTime(time_t t) {
-  char timeStr[8];
-  
-  timeStr[0] = '0' + hour(t) / 10;
-  timeStr[1] = '0' + hour(t) % 10;
-  timeStr[2] = ':';
-  timeStr[3] = '0' + minute(t) / 10;
-  timeStr[4] = '0' + minute(t) % 10;
-  timeStr[5] = ':';
-  timeStr[6] = '0' + second(t) / 10;
-  timeStr[7] = '0' + second(t) % 10;
-
-  return timeStr;
-}
-
 // Display power on matrix & show as thousands if required
 void printPw2Matrix(int pw, Adafruit_7segment &matrix){
   if(pw > 9999) {
@@ -284,10 +298,33 @@ void printPw2Matrix(int pw, Adafruit_7segment &matrix){
   }
 }
 
+// Convert too long string of watt-second to watt-hour 
+unsigned long ws2wh(const char *ws) {
+  int ws_len = strlen(ws);
+  
+  if(ws_len > 9){
+    // Truncate what is too long
+    char truncated[10];
+    strncpy(truncated, ws, 9);
+    // Divide the rest
+    return atol(truncated) / pow(10, 2 - (ws_len - 9)) / 36;
+  } else {
+    return atol(ws) / 3600;
+  }
+}
+
 // Return the time from the Ntp time client
 time_t getNtpTime(){
   timeClient.update();
   return timeClient.getEpochTime();
+}
+
+void printTime(time_t t) {
+  #ifdef DEBUG
+  char format[10];
+  sprintf(format, "%u:%u:%u", hour(t), minute(t), second(t));
+  Serial.println(format);
+  #endif
 }
 
 // Debug output methods
