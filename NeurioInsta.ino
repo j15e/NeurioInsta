@@ -185,7 +185,7 @@ void getConsumption(bool show){
     }
 
     // Track consumption over time
-    if(day_start_time == 0 || day(day_start_time) < day(current_time)) {
+    if(day_start_time == 0 || day(day_start_time) != day(current_time)) {
       day_start_kwh = consumption_kwh;
       day_start_time = current_time;
     }
