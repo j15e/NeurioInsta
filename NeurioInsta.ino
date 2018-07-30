@@ -8,6 +8,9 @@
 #include <Time.h>
 #include <TimeLib.h>
 #include <Timezone.h>
+#include <EEPROM.h>
+
+#define EPROM_MEMORY_SIZE 512
 
 Adafruit_7segment matrix1 = Adafruit_7segment();
 Adafruit_7segment matrix2 = Adafruit_7segment();
@@ -27,11 +30,19 @@ TimeChangeRule usEst = {"EST", First, Sun, Nov, 2, -300};  //UTC - 5 hours
 Timezone usEastern(usEdt, usEst);
 
 unsigned int load_time = 0;
-unsigned int max_pw_read = 0;
-unsigned long day_start_kwh = 0;
-time_t day_start_time = 0;
 time_t local_trip = 0;
 bool is_active = true;
+
+typedef struct {
+ unsigned int max_pw_read;
+ unsigned long day_start_kwh;
+ time_t day_start_time;
+} persistedType;
+
+int prstd_address = 0;
+float prst_flag = 1.1f;
+
+persistedType persisted = {0, 0, 0};
 
 #define NEURIO_GET_QUERY_P1 "GET /current-sample HTTP/1.1\r\nHost: "
 #define NEURIO_GET_QUERY_P2 "\r\nConnection: keep-alive\r\n\r\n"
@@ -43,8 +54,25 @@ void setup() {
   vera_ip.fromString(VERA_IP);
   
   Serial.begin(115200);
+  EEPROM.begin(EPROM_MEMORY_SIZE);
   delay(100);
 
+  // Load stored variables
+  EEPROM.get(prstd_address, prst_flag);
+  if (prst_flag == 1.1f) {
+   EEPROM.get(prstd_address + sizeof(prst_flag), persisted);
+   println("Loaded settings!");
+   println(String("Max power: ") + persisted.max_pw_read);
+   println(String("Day start kWh: ") + persisted.day_start_kwh);
+   println(String("Day start time: ") + persisted.day_start_time);
+  } else {
+   Serial.print(prst_flag);
+   EEPROM.put(prstd_address, 1.1f);
+   EEPROM.put(prstd_address + sizeof(prst_flag), persisted);
+   EEPROM.commit();
+   delay(500);
+  }
+  
   // Connecting to WiFi network
   println();
   println();
@@ -134,7 +162,7 @@ void loop() {
   if(show) {
     getConsumption(true);
   // Get required for consumption of the day
-  } else if(day_start_time == 0 || day(day_start_time) < day(local)) {
+  } else if(persisted.day_start_time == 0 || day(persisted.day_start_time) < day(local)) {
     getConsumption(false);
   } else {
     println("Display OFF");
@@ -180,23 +208,24 @@ void getConsumption(bool show){
     consumption_pw = sample["channels"][2]["p_W"];
 
     // Track maximum consumption peak
-    if(consumption_pw > max_pw_read) {
-      max_pw_read = consumption_pw;
+    if(consumption_pw > persisted.max_pw_read) {
+      persisted.max_pw_read = consumption_pw;
     }
 
     // Track consumption over time
-    if(day_start_time == 0 || day(day_start_time) != day(current_time)) {
-      day_start_kwh = consumption_kwh;
-      day_start_time = current_time;
+    if(persisted.day_start_time == 0 || day(persisted.day_start_time) != day(current_time)) {
+      persisted.day_start_kwh = consumption_kwh;
+      persisted.day_start_time = current_time;
+      savePersisted();
     }
     
-    today_imported_wh = (consumption_kwh - day_start_kwh);
+    today_imported_wh = (consumption_kwh - persisted.day_start_kwh);
 
     #ifdef DEBUG
     char buffer[28];
     sprintf(buffer, "Current Power : %dkW", consumption_pw);
     println(buffer);
-    sprintf(buffer, "Maximum Power : %dkW", max_pw_read);
+    sprintf(buffer, "Maximum Power : %dkW", persisted.max_pw_read);
     println(buffer);
     sprintf(buffer, "Imported Power : %dWh", today_imported_wh);
     println(buffer);
@@ -209,7 +238,7 @@ void getConsumption(bool show){
   if(!show) return;
 
   // Display current consumption & set brightness relative to maximum consumption
-  float brightness = (float)consumption_pw / max_pw_read * 15;
+  float brightness = (float)consumption_pw / persisted.max_pw_read * 15;
 
   printPw2Matrix(consumption_pw, matrix1);
   matrix1.setBrightness(brightness);
@@ -218,6 +247,13 @@ void getConsumption(bool show){
   printPw2Matrix(today_imported_wh, matrix2);
   matrix2.setBrightness(brightness);
   matrix2.writeDisplay();
+}
+
+void savePersisted() {
+  println("Saving persisted variables");
+  EEPROM.put(prstd_address + sizeof(prst_flag), persisted);
+  EEPROM.commit();
+  delay(500);
 }
 
 // Get all client body response
